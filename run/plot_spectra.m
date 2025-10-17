@@ -1,3 +1,7 @@
+%%
+disp("hasdf")
+
+%%
 % Robustly add project 'src' folder to path (works when run from run/plot_spectra.m)
 thisFile = mfilename('fullpath');
 if isempty(thisFile)
