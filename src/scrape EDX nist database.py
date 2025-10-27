@@ -2,6 +2,8 @@ import re
 import requests
 import csv
 from bs4 import BeautifulSoup
+import unicodedata
+
 
 BASE_URL = "https://physics.nist.gov/cgi-bin/XrayTrans/search.pl"
 NUM_RE = re.compile(r'(\d[\d\s]*\.\d+|\d[\d\s]*)')  # will match "817.69" from "817.69(56) and ignore spaces"
@@ -77,6 +79,15 @@ def parse_transitions(html_text, element_symbol):
 
     return rows_out
 
+def clean_num(x):
+    if not x:
+        return ''
+    # normalize Unicode (remove Â, non-breaking spaces, narrow spaces)
+    x = unicodedata.normalize('NFKC', x)
+    x = x.replace('\u00A0', '').replace('\u202F', '').replace(' ', '')
+    # enforce dot as decimal separator
+    x = x.replace(',', '.')
+    return x
 
 def main():
     elements = [
@@ -88,16 +99,21 @@ def main():
         "Th","U"
     ]
 
-    out_fname = "nist_xray_transitions.csv"
-    with open(out_fname, "w", newline="") as f:
-        w = csv.writer(f)
+    out_fname = "nist_xray_transitions_test.csv"
+    with open(out_fname, "w", newline="", encoding="utf-8") as f:
+        # use quoting to avoid problems with commas in text fields
+        w = csv.writer(f, delimiter=',', quoting=csv.QUOTE_MINIMAL)
         w.writerow(["Element", "Transition", "Theoretical_eV", "Experimental_eV"])
         for el in elements:
             print(f"Fetching {el}")
             html = fetch_element_data(el)
             data = parse_transitions(html, el)
             for row in data:
-                w.writerow(row)
+                # replace commas in transition names and ensure decimal points
+             row[1] = row[1].replace(',', ' ')   # prevent commas inside text
+             row[2] = clean_num(row[2])
+             row[3] = clean_num(row[3])
+             w.writerow(row)
 
     print("Saved", out_fname)
 
