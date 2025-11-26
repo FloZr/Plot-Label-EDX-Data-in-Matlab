@@ -1,7 +1,23 @@
-function returnvalue=label_spectra(spectrum_path,elements,max_kev)
-    
+function fig_handle=label_spectra(spectrum_path,elements,max_kev,plot_labels,fig_size)
+
+% LABEL_SPECTRA  Plot and label an EDX spectrum.
+%
+%   fig_handle = label_spectra(spectrum_path, elements_transitions, ...
+%                              max_kev, plot_labels, fig_size)
+%
+%   Plots the EDX spectrum stored at *spectrum_path* (CSV or MSA) and
+%   labels the peaks/transitions specified in *elements_transitions* up to
+%   *max_kev*. 
+%
+%   *plot_labels*   – set true to display peak labels.
+%   *fig_size*      – 1×2 vector [width_cm, height_cm] defining the figure
+%                      size in centimeters.
+%
+%   The function returns the handle of the generated figure.
+
+
     [~, ~, file_type] = fileparts(spectrum_path);
-    file_type = erase(file_type, '.');  % remove the dot
+    file_type = erase(file_type, '.');  % removes the dot
 
 
     switch file_type
@@ -12,97 +28,138 @@ function returnvalue=label_spectra(spectrum_path,elements,max_kev)
           spectrum_data = renamevars(spectrum_data, 'Var2', 'counts');
        case "msa"
           spectrum_data=read_emsa(spectrum_path);
-        
-       otherwise
+        otherwise
+            error('Unsupported file type');
           
     end
-
-    
 
     % id of max_keV
     idx = spectrum_data.energy < max_kev;
     
     hold on;
 
-    plot(spectrum_data.energy(idx), spectrum_data.counts(idx));
 
-    % Plot spectrum
-    xlabel('Energy (KeV)');
-    ylabel('Counts');
+    fig = gcf;
+    fig.Units = 'centimeters';
+    fig.Position(3) = fig_size(1); % width in cm
+    fig.Position(4) = fig_size(2);  % height in cm 
+
+    % this ensures plot is centered on screen. 
+    % cirumvents weird matlab bug where figure will be outside the
+    % screen range
+    screensize_px = get(0,'ScreenSize');  % [left bottom width height in px]
+    dpi = get(0,'ScreenPixelsPerInch');             % pixels per inch
+    px_to_cm = 2.54 / dpi;                           % conversion factor
+    screen_width_cm  = screensize_px(3) * px_to_cm;
+    screen_height_cm = screensize_px(4) * px_to_cm;
+
+    % compute centered position
+    fig_x = (screen_width_cm  - fig_size(1)) / 2;
+    fig_y = (screen_height_cm - fig_size(2)) / 2;
+
+    % set position
+    fig.Position(1) = fig_x;
+    fig.Position(2) = fig_y;
+
+    ax = gca;
+    ax.Units = 'centimeters';
  
-    % Read and filter NIST peak data - now handled in fun_func
-    % edx_label_infos = read_NIST_peak_information();
-    % element_peaks = [];
-    % 
-    % for i = 1:length(elements)
-    %     matches = edx_label_infos(strcmp(edx_label_infos.Element, elements{i}), :);
-    %     element_peaks = [element_peaks; matches]; 
-    % end
-    % 
-    % element_peaks.Experimental_eV=element_peaks.Experimental_eV/1000; % convert to keV
-
-    %%%%%%%%%%%%%%%%% first iteration of label plots 
-    % Plot vertical lines and labels for each peak
-    % for i = 1:height(element_peaks)
-    %     x = element_peaks.Experimental_eV(i)/1000;
-    %     y = max(spectrum_data.Var2(idx)) * 0.9; % place labels near top of plot
-    %     xline(x, 'r--');
-    %     text(x, y, append(element_peaks.Element{i},element_peaks.Transition{i}), 'Rotation', 90, ...
-    %         'VerticalAlignment', 'bottom', 'HorizontalAlignment', 'center', 'FontSize', 8);
-    % end
-    %%%%%%%%%%%%%%%%%
-
-    % Prepare offsets to avoid overlapping boxes
-    plottedY = []; % stores y positions of already plotted boxes
-    % minBoxSpacing = 0.05 * max(spectrum_data.Var2(idx)); % minimum vertical spacing
-    minBoxSpacing=0.1;
+    % Plot spectrum
+    spectrum_energy=spectrum_data.energy;
     
+    % insert 0 so plot starts at 0
+    spectrum_energy=[0; spectrum_energy];
+    spectrum_energy=spectrum_energy(1:end-1);
+    
+    % this represents channels the best
+    stairs(spectrum_energy(idx), spectrum_data.counts(idx),'LineWidth',2.5)
+    
+    % visual formatting of figure
+    ax = gca;
+    ax.LineWidth = 1.2;
+    ax.FontSize = 11;          % tick labels
+    ax.FontName = 'Arial';
+
+    xlabel('Energy (keV)', 'FontSize', 12, 'FontWeight', 'bold');
+    ylabel('Counts',        'FontSize', 12, 'FontWeight', 'bold');
+    ax.GridAlpha = 0.15;
+    grid on;
+
+    if ~plot_labels
+        fig_handle = gcf;
+        return;
+    end
+
     % Filter data by idx 
     xFiltered = spectrum_data.energy(idx);
     yFiltered = spectrum_data.counts(idx);
 
+    % Prepare offsets to avoid overlapping boxes
+    plottedY = []; % stores y positions of already plotted boxes
+    plottedX=[];
+
+    ax = gca;
+
+    % minimum distances of text boxes
+    minBoxSpacingFactor = 0.05; 
+    minBoxSpacing = minBoxSpacingFactor * diff(ax.YLim); % fraction of Y-axis range
+    minBoxSpacingX = 0.02 * diff(ax.XLim); % fraction of X-axis range
+   
+    % loop over each peak
     for i = 1:height(elements)
         xPeak = elements.Experimental_eV(i);
 
         % Find local max Y around the peak for placing box
-        xRange = 0.01; % eV window around peak
+        xRange = 0.01; % keV window around peak
         xMask = xFiltered >= xPeak - xRange & xFiltered <= xPeak + xRange;
+
         if any(xMask)
             yPeak = max(yFiltered(xMask)); % only use filtered y values
         else
             yPeak = max(yFiltered);
         end
 
-        % Add vertical offset to avoid overlapping boxes
-        yBox = yPeak * 1.05; % start slightly above peak
-        while any(abs(yBox - plottedY) < minBoxSpacing)
-            yBox = yBox + minBoxSpacing; % increase offset if too close
+        yBox = yPeak +minBoxSpacing*0.75; % start label slightly above peak
+
+        % if y distance between text boxes is smaller than minBoxSpacing increase the y
+        % spacing, while also checking if they would overlap in x
+        
+        while any(abs(yBox - plottedY) < minBoxSpacing*1.3) && any(abs(xPeak - plottedX) < minBoxSpacingX*1.3)
+            yBox = yBox + minBoxSpacing*0.25; % increase offset if too close
         end
-        plottedY = [plottedY, yBox];
+
+
+        plottedY(end+1) = yBox;
+        plottedX(end+1) = xPeak;
 
         % Plot dashed line from box to x-axis
-        line([xPeak xPeak], [0 yBox], 'LineStyle', '--', 'Color', 'r');
-
-        % Plot box with text
+        line([xPeak xPeak], [0 yBox], 'LineStyle', '--','LineWidth',1.5);
+   
+         % Plot box with text
         strLabel = append(elements.Element{i},": ", elements.Transition{i});
 
-        % Convert to normalized figure coordinates for annotation,
-        % necessary as annotation() needs figure coordinates
-        %%%% text with anotation 
-        % ax = gca;
-        % xNorm = (xPeak - ax.XLim(1)) / (ax.XLim(2) - ax.XLim(1));
-        % yNorm = (yBox - ax.YLim(1)) / (ax.YLim(2) - ax.YLim(1));
-        % annotation('textbox', [xNorm, yNorm, 0.05, 0.03], 'String', strLabel, ...
-        %     'EdgeColor', 'k', 'BackgroundColor', 'w', 'HorizontalAlignment', 'center', ...
-        %     'VerticalAlignment', 'bottom', 'FontSize', 8);
-        %%%%
-        % Draw text box with label
-        
         text(xPeak, yBox, strLabel, 'EdgeColor', 'k', 'BackgroundColor', 'w', ...
-             'HorizontalAlignment', 'center', 'VerticalAlignment', 'bottom', 'FontSize', 8);
+             'HorizontalAlignment', 'center', 'VerticalAlignment', 'bottom', 'FontSize', 9);
 
     end
 
+    %%%%%% this finds all the text labels , excluding ticks and axis
+    %%%%%% labels, and brings them in front of the spectrum. maybe put this
+    %%%%%% in extra function that gets called in run_func, then the order
+    %%%%%% of calling the fcuntions wouldnt matter
+    ax = gca;
+    hTxt = findall(ax,'Type','text');
 
+    % Exclude xlabel, ylabel, zlabel, title
+    hExclude = [ax.XLabel, ax.YLabel, ax.ZLabel, ax.Title];
+    hTxt = setdiff(hTxt, hExclude);
+
+    for k = 1:numel(hTxt)
+        uistack(hTxt(k),'top');
+    end
+    %%%%%%
     
+    set(gca, 'LooseInset', max(get(gca,'TightInset'), 0.5))  
+    hold off
+    fig_handle = gcf;   % return handle of the current figure
 end
