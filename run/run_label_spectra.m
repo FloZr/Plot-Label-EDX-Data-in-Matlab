@@ -4,7 +4,7 @@
 % handling can happen inside the function
 % msa file gives in header infos about energy/channel -> is this correct? (slightly different to 10ev)
 %% Plot parameters
-
+disp('test')
 elements=["Al","Si"];
 max_keV=3;
 fig_size=[28,18];
